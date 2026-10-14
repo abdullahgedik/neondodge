@@ -17,7 +17,7 @@ local MENU_ITEM_WIDTH    = 312
 local MENU_ITEM_HEIGHT   = 45
 local MENU_ITEM_GAP      = 13
 
-UI.MAIN_MENU_OPTIONS     = { "Start Game", "Boss Rush", "Reset High Score", "Quit" }
+UI.MAIN_MENU_OPTIONS     = { "Start Game", "Boss Rush", "Reset Records", "Quit" }
 UI.PAUSE_MENU_OPTIONS    = { "Resume", "Restart", "Quit to Menu" }
 
 local function main_menu_top_y()
@@ -33,6 +33,7 @@ end
 -- on-screen size instead of being stretched (see Screen.new_font)
 local MAIN_FONT_SIZE     = 24
 local TITLE_FONT_SIZE    = 40
+local SMALL_FONT_SIZE    = 16
 
 function UI.load()
     UI.refresh_fonts()
@@ -48,6 +49,7 @@ function UI.refresh_fonts()
     UI.font_scale = Screen.scale
     UI.main_font = Screen.new_font(MAIN_FONT_SIZE)
     UI.title_font = Screen.new_font(TITLE_FONT_SIZE)
+    UI.small_font = Screen.new_font(SMALL_FONT_SIZE)
 end
 
 -- shared layout for any simple menu -- single source of truth for both
@@ -112,48 +114,59 @@ end
 local HEART_MARGIN_X = 30
 local HEART_MARGIN_Y = 23
 local HEART_SPACING  = 42
+-- the most horizontal room the heart row may take, so a big Vitality stack
+-- compresses the row instead of running into the centered score text
+local HEART_ROW_MAX  = 330
 
-local function drawHeart(x, y, distance)
-    love.graphics.setColor(1, 0.2, 0.3)
-    local ox = distance
-    local lcx = x + 6 + ox
-    local rcx = x + 18 + ox
-    local cy = y + 6
-    local radius = 6
-
-    love.graphics.circle("fill", lcx, cy, radius)
-    love.graphics.circle("fill", rcx, cy, radius)
-
-    local points = {
-        x + ox, y + 8,
-        x + 12 + ox, y + 24,
-        x + 24 + ox, y + 8,
-    }
-    love.graphics.polygon("fill", points)
+-- a 24x24 heart with its top-left at (x, y)
+local function draw_heart(x, y)
+    love.graphics.circle("fill", x + 6, y + 6, 6)
+    love.graphics.circle("fill", x + 18, y + 6, 6)
+    love.graphics.polygon("fill", x, y + 8, x + 12, y + 24, x + 24, y + 8)
 end
+
+-- full hearts for current HP, dim ones for the HP that's missing, and a blue
+-- shield badge at the end of the row while a shield is up
+local function draw_hearts(lives, max_lives, has_shield)
+    max_lives = math.max(max_lives or lives, lives)
+    local spacing = math.min(HEART_SPACING, HEART_ROW_MAX / math.max(max_lives, 1))
+
+    for i = 1, max_lives do
+        if i <= lives then
+            love.graphics.setColor(1, 0.2, 0.3)
+        else
+            love.graphics.setColor(0.35, 0.12, 0.18, 0.8)
+        end
+        draw_heart(HEART_MARGIN_X + (i - 1) * spacing, HEART_MARGIN_Y)
+    end
+
+    if has_shield then
+        local cx = HEART_MARGIN_X + (max_lives - 1) * spacing + 24 + 20
+        love.graphics.setLineWidth(3)
+        love.graphics.setColor(0.3, 0.65, 1)
+        love.graphics.circle("line", cx, HEART_MARGIN_Y + 12, 11)
+        love.graphics.setLineWidth(1)
+    end
+end
+
+-- index of "Reset Records" in UI.MAIN_MENU_OPTIONS
+local MENU_RESET_INDEX = 3
 
 function UI.draw_menu(high_score, cursor_index, reset_armed, rush_best)
     love.graphics.setFont(UI.title_font)
     love.graphics.setColor(0, 1, 0.85)
+    Screen.print_centered(UI.title_font, "NEON DODGE", Screen.HEIGHT / 2 - 170)
 
-    local title_text = "NEON DODGE"
-    local t_width = Screen.text_width(UI.title_font, title_text)
-    -- pushed up from -126 now that the menu has a 4th option (Boss Rush) and
-    -- grew taller -- main_menu_top_y() moved up to -110 to stay centered, and
-    -- the old title offset was only ~5px clear of a 3-item menu, so it now
-    -- overlapped
-    Screen.print(title_text, (Screen.WIDTH - t_width) / 2, Screen.HEIGHT / 2 - 170)
-
-    -- "Reset High Score" arms instead of firing immediately -- a second
-    -- confirm within a few seconds (see main.lua's reset_confirm_timer)
-    -- actually resets it, so a misclick can't silently erase the record.
-    -- Reset sits at index 3 of the 4 options (Start Game, Boss Rush, Reset
-    -- High Score, Quit).
+    -- "Reset Records" arms instead of firing immediately -- a second confirm
+    -- within a few seconds (see main.lua's reset_confirm_timer) actually
+    -- resets, so a misclick can't silently erase either record
     local labels = UI.MAIN_MENU_OPTIONS
     local danger_index = nil
     if reset_armed then
-        labels = { labels[1], labels[2], "Click again to confirm", labels[4] }
-        danger_index = 3
+        labels = {}
+        for i, label in ipairs(UI.MAIN_MENU_OPTIONS) do labels[i] = label end
+        labels[MENU_RESET_INDEX] = "Click again to confirm"
+        danger_index = MENU_RESET_INDEX
     end
     UI.draw_simple_menu(labels, cursor_index, main_menu_top_y(), danger_index)
 
@@ -161,17 +174,20 @@ function UI.draw_menu(high_score, cursor_index, reset_armed, rush_best)
 
     if high_score and high_score > 0 then
         love.graphics.setColor(1, 0.9, 0.2)
-        local hs_text = "High Score: " .. high_score
-        local hs_width = Screen.text_width(UI.main_font, hs_text)
-        Screen.print(hs_text, (Screen.WIDTH - hs_width) / 2, Screen.HEIGHT / 2 + 135)
+        Screen.print_centered(UI.main_font, "High Score: " .. high_score, Screen.HEIGHT / 2 + 135)
     end
 
     if rush_best and rush_best > 0 then
         love.graphics.setColor(1, 0.55, 0.2)
-        local rb_text = "Boss Rush Best: " .. rush_best .. " cleared"
-        local rb_width = Screen.text_width(UI.main_font, rb_text)
-        Screen.print(rb_text, (Screen.WIDTH - rb_width) / 2, Screen.HEIGHT / 2 + 165)
+        Screen.print_centered(UI.main_font, "Boss Rush Best: " .. rush_best .. " cleared", Screen.HEIGHT / 2 + 165)
     end
+
+    love.graphics.setFont(UI.small_font)
+    love.graphics.setColor(0.55, 0.6, 0.7)
+    Screen.print_centered(UI.small_font,
+        "Move: WASD / Arrows / Left stick    Dash: Shift / A    Pause: P / Esc / Start    Fullscreen: F11",
+        Screen.HEIGHT - 32)
+    love.graphics.setColor(1, 1, 1, 1)
 end
 
 function UI.card_layout()
@@ -190,7 +206,13 @@ function UI.card_layout()
     return rects
 end
 
-function UI.draw_card_select(cards, cursor_index, elapsed, chosen_index)
+-- the card screen's heading, by what opened it
+local CARD_TITLES = {
+    boss  = "BOSS DEFEATED",
+    score = "SCORE MILESTONE",
+}
+
+function UI.draw_card_select(cards, cursor_index, elapsed, chosen_index, reason)
     elapsed = elapsed or CARD_ANIM_DURATION
 
     -- overlay itself fades in first; everything else rides on top of it
@@ -202,15 +224,11 @@ function UI.draw_card_select(cards, cursor_index, elapsed, chosen_index)
 
     love.graphics.setFont(UI.title_font)
     love.graphics.setColor(0, 1, 0.85, overlay_t)
-    local title_text = "WAVE CLEAR"
-    local t_width = Screen.text_width(UI.title_font, title_text)
-    Screen.print(title_text, (Screen.WIDTH - t_width) / 2, 54)
+    Screen.print_centered(UI.title_font, CARD_TITLES[reason] or "UPGRADE", 44)
 
     love.graphics.setFont(UI.main_font)
     love.graphics.setColor(1, 1, 1, overlay_t)
-    local sub_text = "Choose an upgrade"
-    local sub_width = Screen.text_width(UI.main_font, sub_text)
-    Screen.print(sub_text, (Screen.WIDTH - sub_width) / 2, 95)
+    Screen.print_centered(UI.main_font, "Choose an upgrade", 100)
 
     local rects = UI.card_layout()
 
@@ -269,9 +287,7 @@ function UI.draw_card_select(cards, cursor_index, elapsed, chosen_index)
     end
 
     love.graphics.setColor(0.7, 0.75, 0.8, overlay_t)
-    local hint_text = "Click a card, press 1/2/3, or use D-pad + A"
-    local hint_width = Screen.text_width(UI.main_font, hint_text)
-    Screen.print(hint_text, (Screen.WIDTH - hint_width) / 2, 432)
+    Screen.print_centered(UI.main_font, "Click a card, press 1/2/3, or move + Enter / A", 432)
 
     love.graphics.setColor(1, 1, 1, 1)
 end
@@ -324,53 +340,46 @@ local function draw_pause_overlay(view)
 end
 
 local function draw_game_over_overlay(view)
+    love.graphics.setColor(0, 0, 0, 0.45)
+    love.graphics.rectangle("fill", 0, 0, Screen.WIDTH, Screen.HEIGHT)
+
     love.graphics.setFont(UI.title_font)
     love.graphics.setColor(1, 0, 0)
-    Screen.print_centered(UI.title_font, "GAME OVER!", Screen.HEIGHT / 2 - 36)
+    Screen.print_centered(UI.title_font, "GAME OVER", Screen.HEIGHT / 2 - 80)
 
     love.graphics.setFont(UI.main_font)
-    love.graphics.setColor(1, 1, 1)
-    Screen.print_centered(UI.main_font, "Press 'R' to restart..", Screen.HEIGHT / 2 + 18)
 
+    local result_text, record_text
     if view.mode == "boss_rush" then
-        local cleared = view.rush_cleared or 0
-        love.graphics.setColor(1, 0.55, 0.2)
-        Screen.print_centered(UI.main_font, "Bosses Cleared: " .. cleared .. " (Lap " .. (view.rush_lap or 1) .. ")",
-            Screen.HEIGHT / 2 + 50)
-
-        if view.rush_best then
-            local is_new_record = cleared >= view.rush_best and cleared > 0
-            local text = is_new_record
-                and ("New Boss Rush Best: " .. view.rush_best .. "!")
-                or ("Boss Rush Best: " .. view.rush_best)
-
-            love.graphics.setColor(1, 0.9, 0.2)
-            Screen.print_centered(UI.main_font, text, Screen.HEIGHT / 2 + 80)
-        end
-        return
+        result_text = "Bosses Cleared: " .. (view.rush_cleared or 0) .. "  (Lap " .. (view.rush_lap or 1) .. ")"
+        record_text = view.new_record
+            and ("New Boss Rush Best: " .. (view.rush_best or 0) .. "!")
+            or ("Boss Rush Best: " .. (view.rush_best or 0))
+    else
+        result_text = "Score: " .. view.score
+        record_text = view.new_record
+            and ("New High Score: " .. (view.high_score or 0) .. "!")
+            or ("High Score: " .. (view.high_score or 0))
     end
 
-    if view.high_score then
-        local is_new_record = view.score >= view.high_score and view.score > 0
-        local text = is_new_record
-            and ("New High Score: " .. view.high_score .. "!")
-            or ("High Score: " .. view.high_score)
+    love.graphics.setColor(1, 1, 1)
+    Screen.print_centered(UI.main_font, result_text, Screen.HEIGHT / 2 - 10)
 
-        love.graphics.setColor(1, 0.9, 0.2)
-        Screen.print_centered(UI.main_font, text, Screen.HEIGHT / 2 + 50)
-    end
+    love.graphics.setColor(1, 0.9, 0.2)
+    Screen.print_centered(UI.main_font, record_text, Screen.HEIGHT / 2 + 22)
+
+    love.graphics.setColor(0.7, 0.75, 0.8)
+    Screen.print_centered(UI.main_font, "R / Enter / A: restart     M / Esc / B: menu", Screen.HEIGHT / 2 + 80)
+    love.graphics.setColor(1, 1, 1, 1)
 end
 
 -- `view` is everything the HUD needs for this frame, as one named table --
--- see the call in main.lua's love.draw. It used to be sixteen positional
--- arguments, at which point neither the call nor the signature was readable
--- and adding a field meant counting commas. Building a small table per frame
--- costs nothing that matters here.
+-- see the call in main.lua's love.draw.
 --
--- Expected fields: state, mode, score, lives, orbs, wave, high_score,
--- rush_cleared, rush_lap, rush_best,
--- boss_active, boss_incoming, storm_type, storm_phase,
--- cards, card_cursor, card_elapsed, chosen_card, menu_cursor, reset_armed
+-- Expected fields: state, mode, score, new_record, lives, max_lives,
+-- has_shield, orbs, wave, high_score, rush_cleared, rush_lap, rush_best,
+-- boss_active, boss_incoming, storm_type, storm_phase, card_reason, cards,
+-- card_cursor, card_elapsed, chosen_card, menu_cursor, reset_armed
 function UI.draw(view)
     if view.state == GameState.MENU then
         UI.draw_menu(view.high_score, view.menu_cursor, view.reset_armed, view.rush_best)
@@ -378,13 +387,11 @@ function UI.draw(view)
     end
 
     if view.state == GameState.CARD_SELECT then
-        UI.draw_card_select(view.cards, view.card_cursor, view.card_elapsed, view.chosen_card)
+        UI.draw_card_select(view.cards, view.card_cursor, view.card_elapsed, view.chosen_card, view.card_reason)
         return
     end
 
-    for i = 1, view.lives do
-        drawHeart(HEART_MARGIN_X, HEART_MARGIN_Y, (i - 1) * HEART_SPACING)
-    end
+    draw_hearts(view.lives, view.max_lives, view.has_shield)
 
     love.graphics.setFont(UI.main_font)
 

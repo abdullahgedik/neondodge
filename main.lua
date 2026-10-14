@@ -27,12 +27,10 @@ local Storms                    = require("src/storms")
 local Unlocks                   = require("src/unlocks")
 
 -- This file's own helpers and event handlers live on `Game`, NOT on `love`.
--- The distinction matters when reading the file: everything named `love.xxx`
--- here is a callback LÖVE itself calls for us (there are exactly seven --
--- load, update, draw, resize, keypressed, gamepadpressed, mousepressed), and
--- everything named `Game.xxx` is ours. These used to sit on `love` too, which
--- made `Game.shake(...)` look like an engine feature you could go read the
--- LÖVE docs for; it isn't, and there was no way to tell from the name.
+-- Everything named `love.xxx` here is a callback LÖVE itself calls for us
+-- (load, update, draw, resize, focus, keypressed, gamepadpressed,
+-- gamepadaxis, mousepressed, mousemoved); everything named `Game.xxx` is
+-- ours, so it's never mistaken for an engine feature.
 --
 -- A table (rather than plain locals) because Lua resolves `local` by where it
 -- appears in the source: love.update sits near the top of this file but calls
@@ -94,18 +92,15 @@ local CARD_CONFIRM_DELAY        = 0.5 -- holds the card screen after a pick so i
 
 local CARD_CHOICE_COUNT         = 3
 
--- score used to be purely cosmetic outside of the high-score comparison --
--- bosses were the only source of cards, and with encounters now longer and
--- spaced every 6 waves, that's a long stretch of a run with nothing to show
--- for good play. A flat score milestone grants a bonus card on top of the
--- boss ones; it stays flat rather than scaling up, so score-boosting cards
--- (Wave Bonus, Orb Magnet, score multipliers) naturally make these come
--- faster as a run snowballs, instead of being tuned against a moving target.
+-- every SCORE_PER_CARD points grants a bonus card on top of the boss ones, so
+-- good play between bosses is rewarded too. It stays flat rather than scaling
+-- up, so score-boosting cards (Wave Bonus, Orb Magnet, score multipliers)
+-- naturally make these come faster as a run snowballs.
 local SCORE_PER_CARD            = 200
 
--- "Reset High Score" arms instead of firing immediately -- a second confirm
--- within this many seconds actually resets it, so a misclick can't silently
--- erase the record.
+-- "Reset Records" arms instead of firing immediately -- a second confirm
+-- within this many seconds actually resets them, so a misclick can't silently
+-- erase either record.
 local RESET_CONFIRM_DELAY       = 3
 
 -- indices into UI.MAIN_MENU_OPTIONS / UI.PAUSE_MENU_OPTIONS. Named because the
@@ -131,11 +126,8 @@ local RUSH_DIFFICULTY_STEP      = 0.15
 -- Run state
 -- ===========================================================================
 -- Everything that belongs to the current run lives in this one table, and
--- reset_run_state() is the only thing that clears it. That used to be ~20 loose
--- locals plus a hand-written list of 20 assignments inside restart_game, which
--- is the exact shape of bug this project has already hit twice (a variable
--- added to the top and forgotten in the reset). Now adding a field to `run`
--- automatically means it gets wiped, because there's one list, not two.
+-- reset_run_state() is the only thing that clears it. A new field added here
+-- is wiped on restart automatically -- there's no second list to keep in sync.
 --
 -- Deliberately NOT in here: menu_cursor and reset_confirm_timer, which belong
 -- to menu navigation rather than a run and are reset when a menu is entered.
@@ -144,6 +136,9 @@ local run                       = {}
 local function reset_run_state()
     run.score = 0
     run.collected_orbs = 0
+    -- set at death time, from whether the save actually beat the old record,
+    -- so the game-over screen never calls a tie a "new" record
+    run.new_record = false
 
     -- which ruleset is active. "survival" is the default every reset lands
     -- on; start_boss_rush() flips it after resetting (see below). Not a
@@ -177,7 +172,9 @@ local function reset_run_state()
     run.next_score_card = SCORE_PER_CARD
     run.pending_score_card = false
 
-    -- card select
+    -- card select. card_reason ("boss" / "score" / "debug") only picks the
+    -- screen's title.
+    run.card_reason = nil
     run.card_choices = nil
     run.card_cursor = 1
     run.chosen_card = nil
@@ -201,6 +198,11 @@ reset_run_state()
 -- menu navigation state, which outlives any single run
 local menu_cursor         = 1
 local reset_confirm_timer = 0
+
+-- last left-stick direction per axis (-1, 0, 1), so menus step once per
+-- push of the stick instead of once per frame it's held
+local stick_state         = { leftx = 0, lefty = 0 }
+local STICK_MENU_THRESHOLD = 0.6
 
 -- forward-declared: the update helpers below need to call these, but they're
 -- defined further down as plain local functions
@@ -231,7 +233,22 @@ end
 -- love.load
 -- ===========================================================================
 
+-- The window/taskbar icon, drawn in code like everything else: the player's
+-- cyan square on the game's dark backdrop.
+local function set_window_icon()
+    local size = 32
+    local icon = love.image.newImageData(size, size)
+    icon:mapPixel(function(x, y)
+        if x >= 8 and x < 24 and y >= 8 and y < 24 then
+            return 0, 1, 0.85, 1
+        end
+        return 0.05, 0.05, 0.1, 1
+    end)
+    love.window.setIcon(icon)
+end
+
 function love.load()
+    set_window_icon()
     for _, module in ipairs(LOADABLE_MODULES) do module.load() end
 end
 
@@ -250,9 +267,15 @@ local function update_blocking_screens(dt)
         return true
     end
 
-    if GameState.is(GameState.PAUSED) then return true end
+    -- the starfield keeps drifting behind the pause and card screens, so the
+    -- game reads as waiting rather than frozen
+    if GameState.is(GameState.PAUSED) then
+        Background.update(dt)
+        return true
+    end
 
     if GameState.is(GameState.CARD_SELECT) then
+        Background.update(dt)
         run.card_elapsed = run.card_elapsed + dt
 
         if run.card_confirm_timer > 0 then
@@ -285,7 +308,7 @@ local function update_freeze_timers(dt)
         if run.post_boss_pause_timer <= 0 then
             if run.pending_card_select then
                 run.pending_card_select = false
-                trigger_card_select()
+                trigger_card_select("boss")
             elseif run.pending_next_rush_boss then
                 run.pending_next_rush_boss = false
                 run.boss_incoming_timer = BOSS_INCOMING_DELAY
@@ -377,7 +400,7 @@ local function update_score_card_trigger(is_game_over)
     if run.storm_telegraph_timer > 0 or run.storm_timer > 0 then return false end
 
     run.pending_score_card = false
-    trigger_card_select()
+    trigger_card_select("score")
     return true
 end
 
@@ -425,6 +448,9 @@ local function update_entities(dt, is_game_over)
 end
 
 function love.update(dt)
+    -- the cursor is only useful on screens with something to click
+    love.mouse.setVisible(not GameState.is(GameState.PLAYING))
+
     if update_blocking_screens(dt) then return end
     if update_freeze_timers(dt) then return end
 
@@ -441,8 +467,7 @@ function love.update(dt)
     Cards.update(dt, is_game_over, Player)
     Difficulty.update(dt, is_game_over)
 
-    -- resolved once and reused by all three checks below, which each used to
-    -- call Difficulty.wave() again for the same answer
+    -- resolved once and shared by the three checks below
     local wave = Difficulty.wave()
 
     -- wave/score are a survival-only concept; Boss Rush tracks bosses
@@ -538,7 +563,10 @@ function love.draw()
         state         = GameState.current,
         mode          = run.mode,
         score         = run.score,
+        new_record    = run.new_record,
         lives         = Player.lives,
+        max_lives     = Player.max_lives,
+        has_shield    = Player.has_shield,
         orbs          = run.collected_orbs,
         wave          = Difficulty.wave(),
         high_score    = HighScore.value,
@@ -551,6 +579,7 @@ function love.draw()
         storm_type    = run.storm_type,
         storm_phase   = storm_phase,
 
+        card_reason   = run.card_reason,
         cards         = run.card_choices,
         card_cursor   = run.card_cursor,
         card_elapsed  = run.card_elapsed,
@@ -602,10 +631,11 @@ local function apply_player_hit(hit_shake_duration, hit_shake_magnitude, death_s
 
     local result = Player.take_damage(1, function()
         GameState.set(GameState.GAME_OVER)
-        HighScore.try_save(run.score)
-        -- harmless no-op outside Boss Rush: run.rush_cleared is always 0 in
-        -- survival, and 0 never beats an existing best
-        BossRushScore.try_save(run.rush_cleared)
+        if run.mode == "boss_rush" then
+            run.new_record = BossRushScore.try_save(run.rush_cleared)
+        else
+            run.new_record = HighScore.try_save(run.score)
+        end
 
         FXManager.spawn("player_death", p_cx, p_cy, 60)
 
@@ -653,9 +683,8 @@ end
 -- Every hazard's collision handler is the same three steps -- consume the
 -- hazard, bail if the player is already dead, apply the hit -- differing only
 -- in which module owns it and how hard the screen shakes. Building them from
--- one factory keeps them from drifting apart the way the hand-copied
--- void-orb-miss handler once did (it silently lost the player flicker and the
--- is_dead guard). `module` is nil for the boss, which has nothing to remove.
+-- one factory keeps them identical. `module` is nil for the boss, which has
+-- nothing to remove.
 local function hazard_collision_handler(module, shake_duration, shake_magnitude)
     return function(index)
         if module then module.remove(index) end
@@ -734,16 +763,11 @@ end
 
 local ORB_MILESTONE = 5
 
-function Game.increase_orb_count(amount)
-    run.collected_orbs = run.collected_orbs + amount
-
-    if run.collected_orbs % ORB_MILESTONE ~= 0 then return end
-
-    Game.increase_score(Cards.get("orb_milestone_bonus", 0))
-
+-- +1 HP, or a shield instead when already at full HP so the reward is never
+-- wasted. Shared by the orb milestone and Boss Rush's between-fights reward.
+local function heal_or_shield()
     local p_cx, p_cy = Player.center()
 
-    -- at full HP the milestone grants a shield instead of a wasted heal
     if Player.lives >= Player.max_lives then
         if Player.give_shield() then
             FXManager.spawn_ring(p_cx, p_cy, 0.25, 0.6, 1, 12, 65, 180)
@@ -753,6 +777,15 @@ function Game.increase_orb_count(amount)
         FXManager.spawn_ring(p_cx, p_cy, 0, 1, 0.85, 12, 65, 180)
         Game.shake(0.1, 2)
     end
+end
+
+function Game.increase_orb_count(amount)
+    run.collected_orbs = run.collected_orbs + amount
+
+    if run.collected_orbs % ORB_MILESTONE ~= 0 then return end
+
+    Game.increase_score(Cards.get("orb_milestone_bonus", 0))
+    heal_or_shield()
 end
 
 -- ===========================================================================
@@ -828,7 +861,7 @@ local function quit_to_menu()
     restart_game(GameState.MENU)
 end
 
-trigger_card_select = function()
+trigger_card_select = function(reason)
     -- defensive: clears any stale pending-freeze state regardless of whether
     -- this was reached via the post-boss delay or triggered directly (e.g.
     -- debug F2), so the two paths can't step on each other
@@ -841,6 +874,7 @@ trigger_card_select = function()
     -- pickable, which would otherwise soft-lock CARD_SELECT with no escape
     if #choices == 0 then return end
 
+    run.card_reason = reason
     run.card_choices = choices
     run.card_cursor = 1
     run.chosen_card = nil
@@ -880,17 +914,7 @@ end
 -- run.rush_difficulty_mult once a full lap of all ten types is cleared.
 function Game.rush_advance()
     run.rush_cleared = run.rush_cleared + 1
-
-    local p_cx, p_cy = Player.center()
-    if Player.lives >= Player.max_lives then
-        if Player.give_shield() then
-            FXManager.spawn_ring(p_cx, p_cy, 0.25, 0.6, 1, 12, 65, 180)
-            Game.shake(0.1, 2)
-        end
-    elseif Player.heal(1) then
-        FXManager.spawn_ring(p_cx, p_cy, 0, 1, 0.85, 12, 65, 180)
-        Game.shake(0.1, 2)
-    end
+    heal_or_shield()
 
     run.rush_boss_index = run.rush_boss_index + 1
     if run.rush_boss_index > #Boss.SEQUENCE then
@@ -945,6 +969,7 @@ local function select_main_menu_option(index)
         -- first select arms, a second one within the window confirms
         if reset_confirm_timer > 0 then
             HighScore.reset()
+            BossRushScore.reset()
             reset_confirm_timer = 0
         else
             reset_confirm_timer = RESET_CONFIRM_DELAY
@@ -973,7 +998,7 @@ end
 
 local function move_main_menu_cursor(delta)
     menu_cursor = step_cursor(menu_cursor, delta, #UI.MAIN_MENU_OPTIONS)
-    -- navigating off "Reset High Score" disarms it
+    -- navigating off "Reset Records" disarms it
     if menu_cursor ~= MAIN_MENU_RESET_INDEX then reset_confirm_timer = 0 end
 end
 
@@ -981,8 +1006,11 @@ local function move_pause_menu_cursor(delta)
     menu_cursor = step_cursor(menu_cursor, delta, #UI.PAUSE_MENU_OPTIONS)
 end
 
+-- wraps over the cards actually on offer, which is fewer than
+-- CARD_CHOICE_COUNT once most cards have hit their max_stacks
 local function move_card_cursor(delta)
-    run.card_cursor = step_cursor(run.card_cursor, delta, CARD_CHOICE_COUNT)
+    if not run.card_choices or #run.card_choices == 0 then return end
+    run.card_cursor = step_cursor(run.card_cursor, delta, #run.card_choices)
 end
 
 -- ===========================================================================
@@ -995,7 +1023,7 @@ local function handle_debug_keys(key)
     if not (Debug.enabled and GameState.is(GameState.PLAYING)) then return false end
 
     if key == "f2" then
-        trigger_card_select()
+        trigger_card_select("debug")
         return true
     elseif key == "f3" then
         Boss.spawn(Debug.cycle_boss(Boss.SEQUENCE))
@@ -1008,11 +1036,10 @@ local function handle_debug_keys(key)
         return true
     end
 
-    -- 1-9 spawn a *specific* boss straight away. Cycling with F3 alone meant
-    -- reaching the 9th type took nine presses (each replacing the last
-    -- mid-encounter), which made testing any one of them tedious. Safe to take
-    -- these keys here: this branch only runs while PLAYING, and the digits are
-    -- otherwise only used on the card-select screen.
+    -- 1-9 spawn a *specific* boss straight away, rather than pressing F3 until
+    -- it comes round. Safe to take these keys here: this branch only runs
+    -- while PLAYING, and the digits are otherwise only used on the
+    -- card-select screen.
     local boss_type = Debug.select_boss(tonumber(key), Boss.SEQUENCE)
     if boss_type then
         Boss.spawn(boss_type)
@@ -1085,7 +1112,11 @@ function love.keypressed(key)
     end
 
     if GameState.is(GameState.GAME_OVER) then
-        if key == "r" then restart_game() end
+        if key == "r" or key == "return" or key == "space" then
+            restart_game()
+        elseif key == "m" or key == "escape" then
+            quit_to_menu()
+        end
         return
     end
 
@@ -1098,7 +1129,7 @@ function love.keypressed(key)
     Player.keypressed(key)
 end
 
-function love.gamepadpressed(joystick, button)
+function love.gamepadpressed(_joystick, button)
     if GameState.is(GameState.MENU) then
         if button == "dpup" then
             move_main_menu_cursor(-1)
@@ -1140,7 +1171,11 @@ function love.gamepadpressed(joystick, button)
     end
 
     if GameState.is(GameState.GAME_OVER) then
-        if button == "a" then restart_game() end
+        if button == "a" or button == "start" then
+            restart_game()
+        elseif button == "b" then
+            quit_to_menu()
+        end
         return
     end
 
@@ -1163,13 +1198,68 @@ local function hit_index(x, y, rects)
     return nil
 end
 
+-- Directional input from the left stick, routed to whichever screen is
+-- showing. Edge-triggered via stick_state: one menu step per push, not one
+-- per frame the stick is held.
+function love.gamepadaxis(_joystick, axis, value)
+    if axis ~= "leftx" and axis ~= "lefty" then return end
+
+    local direction = 0
+    if value > STICK_MENU_THRESHOLD then
+        direction = 1
+    elseif value < -STICK_MENU_THRESHOLD then
+        direction = -1
+    end
+
+    if direction == stick_state[axis] then return end
+    stick_state[axis] = direction
+    if direction == 0 then return end
+
+    if axis == "lefty" then
+        if GameState.is(GameState.MENU) then
+            move_main_menu_cursor(direction)
+        elseif GameState.is(GameState.PAUSED) then
+            move_pause_menu_cursor(direction)
+        end
+    elseif GameState.is(GameState.CARD_SELECT) and not run.chosen_card then
+        move_card_cursor(direction)
+    end
+end
+
+-- Losing window focus mid-run pauses it, so alt-tabbing away never costs HP.
+function love.focus(focused)
+    if not focused and GameState.is(GameState.PLAYING) then
+        toggle_pause()
+    end
+end
+
+-- LOVE reports window coordinates; every layout below (UI.card_layout, the
+-- two menu layouts) is expressed in game coordinates. Converting once here
+-- means those layouts stay the single source of truth for both drawing and
+-- hit-testing at any window size.
+function love.mousemoved(x, y)
+    x, y = Screen.to_game(x, y)
+
+    -- hovering moves the same cursor the keyboard and gamepad drive, so all
+    -- three input methods always agree on what's highlighted
+    if GameState.is(GameState.MENU) then
+        local index = hit_index(x, y, UI.main_menu_layout())
+        if index and index ~= menu_cursor then
+            menu_cursor = index
+            if menu_cursor ~= MAIN_MENU_RESET_INDEX then reset_confirm_timer = 0 end
+        end
+    elseif GameState.is(GameState.PAUSED) then
+        local index = hit_index(x, y, UI.pause_menu_layout())
+        if index then menu_cursor = index end
+    elseif GameState.is(GameState.CARD_SELECT) and run.card_choices and not run.chosen_card then
+        local index = hit_index(x, y, UI.card_layout())
+        if index and run.card_choices[index] then run.card_cursor = index end
+    end
+end
+
 function love.mousepressed(x, y, button)
     if button ~= 1 then return end
 
-    -- LOVE reports window coordinates; every layout below (UI.card_layout, the
-    -- two menu layouts) is expressed in game coordinates. Converting once here
-    -- means those layouts stay the single source of truth for both drawing and
-    -- hit-testing exactly as before, at any window size.
     x, y = Screen.to_game(x, y)
 
     if GameState.is(GameState.CARD_SELECT) then

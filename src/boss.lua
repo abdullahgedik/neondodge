@@ -146,6 +146,12 @@ function Boss.spawn_split_clones(instance)
     for _, clone in ipairs({ clone_a, clone_b }) do
         clone.phase = "hover"
         clone.hover_timer = instance.hover_timer
+        -- an orbiting clone (the sentry) skipped the enter phase that would
+        -- have lined it up with its circle, so it glides onto it instead
+        local clone_def = BOSS_TYPES[clone.type_id]
+        if clone_def.movement == Movement.orbit then
+            Movement.join_orbit(clone, clone_def)
+        end
         table.insert(Boss.instances, clone)
     end
 
@@ -328,9 +334,8 @@ function Boss.draw()
         -- 1 for every type except the phantom mid-blink
         local alpha = instance.alpha or 1
 
-        -- each type has its own silhouette (see src/boss/shapes.lua) -- they
-        -- all used to draw the same rounded rectangle, which made nine bosses
-        -- read as one boss in nine colors
+        -- each type has its own silhouette (see src/boss/shapes.lua), so
+        -- bosses are told apart by shape, not just color
         local shape = type_def.shape or Shapes.default
         shape(instance.x, instance.y, type_def.width, type_def.height,
             type_def.color_fill, type_def.color_core, alpha)

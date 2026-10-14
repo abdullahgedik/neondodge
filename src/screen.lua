@@ -3,16 +3,14 @@ local Screen = {}
 -- The game is authored at a fixed 960x540 (16:9) and stays that way forever:
 -- every spawn bound, boss patrol amplitude, arena wall, blast radius and HUD
 -- position in the project is tuned against these two numbers. The *window* is
--- a separate thing entirely -- it can be any size the user drags it to, and
--- love.draw scales the finished 960x540 frame up to fit, letterboxing to
--- preserve the 16:9 aspect ratio so nothing ever stretches or misaligns.
+-- a separate thing entirely -- it can be any size the player drags it to, and
+-- love.draw scales the 960x540 scene up to fit, letterboxing to preserve the
+-- 16:9 aspect ratio so nothing ever stretches or misaligns.
 --
 -- The rule that keeps this honest: game logic asks Screen for its dimensions,
 -- never love.graphics. The only place that should call
--- love.graphics.getWidth/getHeight is this file -- and note it's asking a
--- genuinely different question there ("how big is the window?") than every
--- call site it replaced was ("how big is the play area?"). Those two used to
--- be the same number, which is exactly why they were easy to conflate.
+-- love.graphics.getWidth/getHeight is this file, where the question really is
+-- "how big is the window?" rather than "how big is the play area?".
 Screen.WIDTH     = 960
 Screen.HEIGHT    = 540
 
@@ -77,10 +75,7 @@ function Screen.text_width(font, text)
     return font:getWidth(text) / Screen.scale
 end
 
--- horizontally centered text at a given y. "measure it, subtract from the
--- screen width, halve, print" was written out at 17 separate places in
--- ui.lua, which buried what each line was actually saying under the same
--- three lines of arithmetic every time.
+-- horizontally centered text at a given y
 function Screen.print_centered(font, text, y)
     Screen.print(text, (Screen.WIDTH - Screen.text_width(font, text)) / 2, y)
 end

@@ -1,8 +1,25 @@
 -- Small math helpers used across the project. Nothing LÖVE-specific here --
--- these are the two or three bits of arithmetic that kept getting written out
--- by hand in several files, where the formula is short but says nothing about
--- its intent unless you already recognize it.
+-- short formulas that say little about their intent unless named.
 local Mathx = {}
+
+-- Angle (radians, -pi..pi) of the vector (x, y). Built from single-argument
+-- math.atan, which behaves the same on every Lua version: math.atan2 exists
+-- on LÖVE's LuaJIT but is gone from standard Lua 5.3+.
+function Mathx.atan2(y, x)
+    if x > 0 then
+        return math.atan(y / x)
+    elseif x < 0 then
+        if y >= 0 then
+            return math.atan(y / x) + math.pi
+        end
+        return math.atan(y / x) - math.pi
+    elseif y > 0 then
+        return math.pi / 2
+    elseif y < 0 then
+        return -math.pi / 2
+    end
+    return 0
+end
 
 -- Straight-line blend between two values. t=0 gives `a`, t=1 gives `b`,
 -- 0.5 gives the midpoint. Used for the difficulty spawn-rate ramp and for the

@@ -1,11 +1,8 @@
 -- Where a boss is on each hover frame. A type picks one of these via its
 -- `movement` field in src/boss/types.lua; leaving it out gives the sine patrol.
 --
--- This started as an if/elseif chain on is_orbiter/is_bouncer inside the
--- engine, which stopped scaling the moment charger and phantom needed their own
--- multi-phase motion. The is_* flags still exist, but only for things that
--- aren't movement: spawn placement (is_orbiter) and the split itself
--- (is_splitter).
+-- The is_* flags on a type are not movement: they cover spawn placement
+-- (is_orbiter) and the split itself (is_splitter), which the engine handles.
 --
 -- Every mode takes the same (instance, type_def, dt, player) signature even
 -- where it ignores the tail arguments (hence the `_dt` / `_player` names) --
@@ -25,7 +22,7 @@ local Movement  = {}
 --
 -- Watch out: amplitude must be large enough to actually reach both screen edges
 -- from the boss's spawn x, or a strip down each side is permanently safe no
--- matter what else the type does. That was a real bug in three types at once.
+-- matter what else the type does.
 -- ---------------------------------------------------------------------------
 function Movement.patrol(instance, type_def, _dt, _player)
     instance.x = instance.base_x + math.sin(instance.age * type_def.patrol_speed) * type_def.patrol_amplitude
@@ -35,19 +32,44 @@ end
 -- orbit: a circle around a fixed arena point. The engine's spawn and enter
 -- phase both special-case orbiters to land exactly where this formula puts them
 -- at age 0 -- otherwise hover starts with a visible jump from the generic entry
--- point to wherever the orbit math first evaluates to. That special-casing only
--- covers types that actually go through Boss.spawn/enter -- the splitter's
--- sentry clone skips straight to "hover" (see Boss.spawn_split_clones) and has
--- no equivalent spawn point to align to, so it starts mid-circle instead. A
--- one-time snap right after the split's own FX burst is a fair trade for
--- reusing this outright rather than another bespoke orbit variant.
+-- point to wherever the orbit math first evaluates to. The splitter's sentry
+-- clone skips the enter phase instead, and joins its circle through
+-- Movement.join_orbit below.
 -- ---------------------------------------------------------------------------
-function Movement.orbit(instance, type_def, _dt, _player)
+-- seconds a boss that starts off its circle (see Movement.join_orbit) takes
+-- to glide onto it
+local ORBIT_JOIN_DURATION = 0.6
+
+function Movement.orbit(instance, type_def, dt, _player)
     local center_x = Screen.WIDTH / 2
-    instance.x = center_x + math.cos(instance.age * type_def.orbit_speed) * type_def.orbit_radius -
+    local x = center_x + math.cos(instance.age * type_def.orbit_speed) * type_def.orbit_radius -
         type_def.width / 2
-    instance.y = type_def.orbit_center_y + math.sin(instance.age * type_def.orbit_speed) * type_def.orbit_radius -
+    local y = type_def.orbit_center_y + math.sin(instance.age * type_def.orbit_speed) * type_def.orbit_radius -
         type_def.height / 2
+
+    if instance.orbit_join then
+        instance.orbit_join = math.min(instance.orbit_join + dt / ORBIT_JOIN_DURATION, 1)
+        local t = Mathx.ease_out(instance.orbit_join)
+        x = lerp(instance.orbit_join_x, x, t)
+        y = lerp(instance.orbit_join_y, y, t)
+        if instance.orbit_join >= 1 then instance.orbit_join = nil end
+    end
+
+    instance.x, instance.y = x, y
+end
+
+-- For an orbiter that starts somewhere off its circle (the splitter's sentry,
+-- which skips the enter phase): start its orbit clock at the angle facing its
+-- current position, so it heads for the nearest point on the circle, then
+-- glide onto the circle from where it is instead of snapping there.
+function Movement.join_orbit(instance, type_def)
+    local dx = instance.x + type_def.width / 2 - Screen.WIDTH / 2
+    local dy = instance.y + type_def.height / 2 - type_def.orbit_center_y
+    local angle = Mathx.atan2(dy, dx) % (2 * math.pi)
+
+    instance.age = angle / type_def.orbit_speed
+    instance.orbit_join = 0
+    instance.orbit_join_x, instance.orbit_join_y = instance.x, instance.y
 end
 
 -- ---------------------------------------------------------------------------
@@ -79,8 +101,7 @@ end
 -- 0 at the start of the encounter, 1 at the end. Every timing below is lerped
 -- against it, so the cycle winds up as the fight goes on: early slams stay
 -- readable enough to learn the pattern on, late ones give so little warning
--- that you have to commit to moving before the telegraph even appears. That's
--- the fix for it being too predictable at a fixed rhythm.
+-- that you have to commit to moving before the telegraph even appears.
 --
 -- Exported because the charger's debug_state displays it as a percentage.
 function Movement.charge_aggression(instance, type_def)
@@ -90,12 +111,9 @@ end
 -- The charger may only leave from "aim" -- the part of its cycle where it's
 -- just hovering and tracking, having committed to nothing.
 --
--- On the shared time budget alone it left the instant the timer expired, which
--- could be mid-telegraph (the warning column is up, promising a slam that then
--- never comes) or mid-slam (it vanishes on the way down). Both read as the
--- boss glitching out rather than leaving. Finishing the cycle first costs at
--- most a couple of extra seconds, the same way the laser runs slightly long to
--- finish its last sweep.
+-- On the shared time budget alone it could leave mid-telegraph (a warning
+-- column promising a slam that never comes) or mid-slam (vanishing on the way
+-- down). Finishing the cycle first costs at most a couple of extra seconds.
 function Movement.charge_is_encounter_done(instance, type_def)
     return instance.hover_timer >= Config.encounter_duration(type_def)
         and instance.charge_state == "aim"
@@ -312,6 +330,13 @@ function Movement.pick_blink_position(type_def, player)
     -- every try landed too close (the player is mid-arena) -- take the last
     -- roll rather than looping forever
     return x, y
+end
+
+-- May only leave while fully visible. On the shared timer alone it could
+-- leave mid-fade, sliding off the top as an invisible, intangible body.
+function Movement.blink_is_encounter_done(instance, type_def)
+    return instance.hover_timer >= Config.encounter_duration(type_def)
+        and instance.blink_state == "visible"
 end
 
 function Movement.blink(instance, type_def, dt, player)

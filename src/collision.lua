@@ -3,9 +3,8 @@ local Collision = {}
 -- Every entity in the game overlaps the player through one of exactly two
 -- shapes: a circle (orbs, projectiles, a mine's blast radius) or an
 -- axis-aligned rect with horizontal-only padding (falling hazards, boss
--- bodies). Both were hand-written in seven separate modules before this,
--- which is how a check quietly ends up missing a piece -- see the hazard_*
--- variants below for the piece that actually matters.
+-- bodies). Keeping them in one place means no module can quietly miss a
+-- piece -- see the hazard_* variants below for the piece that matters most.
 --
 -- A read-only "service" module like Cards/Debug/FXManager: required directly
 -- as a top-level local rather than passed in as a lifecycle dependency.

@@ -1,10 +1,8 @@
 -- Boss silhouettes.
 --
--- Every type used to draw the identical rounded rectangle with only its colors
--- changed, so nine bosses read as one boss in nine paints -- and colour alone
--- is the weakest way to tell things apart mid-fight, when you're looking at
--- the arena rather than at the enemy. Each type now has a shape that says
--- something about what it does:
+-- Colour alone is the weakest way to tell bosses apart mid-fight, when you're
+-- looking at the arena rather than at the enemy, so each type has a shape
+-- that says something about what it does:
 --
 --   sentinel  wide angular gunship, barrels along the bottom edge
 --   charger   heavy downward wedge -- it points where it's about to slam
@@ -373,7 +371,7 @@ function Shapes.bouncer(x, y, w, h, fill, core, alpha)
     love.graphics.circle("fill", cx, cy, r * 0.2)
 end
 
--- the shared fallback, and what every type used to look like
+-- the fallback for a type with no `shape` of its own
 function Shapes.default(x, y, w, h, fill, core, alpha)
     set(fill, alpha)
     love.graphics.rectangle("fill", x, y, w, h, 10, 10)

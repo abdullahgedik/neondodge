@@ -122,16 +122,26 @@ function FXManager.load()
     }
 end
 
+-- Finished particle systems are kept per template and reused, rather than a
+-- new one being allocated for every hit and explosion. A system's settings
+-- survive ps:reset(), so a reused one only needs moving and re-emitting.
 function FXManager.spawn(template_name, x, y, count)
     local template = FXManager.templates[template_name]
     if not template then return end
 
-    local ps = love.graphics.newParticleSystem(template.image, template.buffer)
-    template.setup(ps)
+    template.free = template.free or {}
+    local ps = table.remove(template.free)
+    if ps then
+        ps:reset()
+    else
+        ps = love.graphics.newParticleSystem(template.image, template.buffer)
+        template.setup(ps)
+    end
+
     ps:setPosition(x, y)
     ps:emit(count or 25)
 
-    table.insert(FXManager.active_particles, ps)
+    table.insert(FXManager.active_particles, { ps = ps, template = template })
 end
 
 function FXManager.spawn_ring(x, y, r, g, b, start_radius, max_radius, expand_speed)
@@ -141,6 +151,7 @@ function FXManager.spawn_ring(x, y, r, g, b, start_radius, max_radius, expand_sp
         r = r,
         g = g,
         b = b,
+        start_radius = start_radius or 10,
         current_radius = start_radius or 10,
         max_radius = max_radius or 60,
         expand_speed = expand_speed or 150,
@@ -151,9 +162,12 @@ end
 
 function FXManager.update(dt)
     for i = #FXManager.active_particles, 1, -1 do
-        local ps = FXManager.active_particles[i]
-        ps:update(dt)
-        if ps:getCount() == 0 then table.remove(FXManager.active_particles, i) end
+        local fx = FXManager.active_particles[i]
+        fx.ps:update(dt)
+        if fx.ps:getCount() == 0 then
+            table.insert(fx.template.free, fx.ps)
+            table.remove(FXManager.active_particles, i)
+        end
     end
 
     for i = #FXManager.active_rings, 1, -1 do
@@ -161,7 +175,8 @@ function FXManager.update(dt)
 
         ring.current_radius = ring.current_radius + ring.expand_speed * dt
 
-        local progress = (ring.current_radius - 10) / (ring.max_radius - 10)
+        -- fades from fully opaque at its own start radius to clear at max
+        local progress = (ring.current_radius - ring.start_radius) / (ring.max_radius - ring.start_radius)
         ring.alpha = 1.0 - progress
 
         if ring.current_radius >= ring.max_radius or ring.alpha <= 0 then
@@ -172,8 +187,8 @@ end
 
 function FXManager.draw()
     love.graphics.setColor(1, 1, 1, 1)
-    for _, ps in ipairs(FXManager.active_particles) do
-        love.graphics.draw(ps, 0, 0)
+    for _, fx in ipairs(FXManager.active_particles) do
+        love.graphics.draw(fx.ps, 0, 0)
     end
 
     love.graphics.setLineWidth(3)
@@ -185,6 +200,9 @@ function FXManager.draw()
 end
 
 function FXManager.reset()
+    for _, fx in ipairs(FXManager.active_particles) do
+        table.insert(fx.template.free, fx.ps)
+    end
     FXManager.active_particles = {}
     FXManager.active_rings = {}
 end

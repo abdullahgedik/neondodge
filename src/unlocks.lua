@@ -3,15 +3,14 @@
 -- Rather than every hazard type being live from wave 1 with only its spawn
 -- *rate* ramping, the roster itself grows one event at a time: each boss
 -- defeated or storm survived advances the stage, and each hazard waits for its
--- own stage before it can spawn at all. That separates *variety* from *pace* --
--- they used to be the same axis, so wave 1 and wave 10 differed in speed but
--- not in kind.
+-- own stage before it can spawn at all. That separates *variety* from *pace*,
+-- so wave 1 and wave 10 differ in kind, not just in speed.
 --
--- With the current 6-wave boss / 3-wave storm cadence this lands as:
---   waves 1-3   Enemy + Orb only
---   after the wave-3 storm    + VoidOrb
---   after the wave-6 boss     + ZigzagEnemy
---   after the wave-9 storm    + Mine   (full roster)
+-- With the current 6-wave boss / 2-wave storm cadence this lands as:
+--   waves 1-2                 Enemy + Orb only
+--   after the wave-2 storm    + VoidOrb
+--   after the wave-4 storm    + ZigzagEnemy
+--   after the wave-6 boss     + Mine   (full roster)
 local Unlocks    = {}
 
 Unlocks.VOID_ORB = 1

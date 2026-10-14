@@ -4,9 +4,8 @@
 --
 -- A storm is defined by which single hazard it NARROWS DOWN TO, not by piling
 -- everything on. Every hazard not named in a storm's `rates` is suppressed
--- outright for its duration. An early version sped up every type at once and
--- was flatly unsurvivable, and the fix was narrowing the mix rather than
--- turning the multiplier down.
+-- outright for its duration -- speeding up every type at once would be
+-- unsurvivable.
 --
 -- `rates` multiplies that hazard's Difficulty.spawn_rate, which is a *period*
 -- in seconds -- so a value BELOW 1 means "spawns more often" (0.35 ~= 3x) and 1

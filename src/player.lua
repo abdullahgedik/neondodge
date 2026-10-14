@@ -12,12 +12,9 @@ local SIZE = 35
 -- how far above the bottom edge a run starts
 local START_HEIGHT = 90
 
--- Everything a fresh run resets, shared by load() and reset(). These were two
--- separate hand-written lists that had already drifted apart once: reset() was
--- missing max_lives, so a Vitality or Glass Cannon pick leaked into the next
--- run. One function means they cannot disagree again.
+-- Everything a fresh run resets, shared by load() and reset() so the two can
+-- never disagree (e.g. a Vitality pick leaking into the next run).
 local function reset_run_state()
-    -- centered: SIZE/2, not a hardcoded 15 (which left the player 2.5px off)
     Player.x = Screen.WIDTH / 2 - SIZE / 2
     Player.y = Screen.HEIGHT - START_HEIGHT
 
@@ -88,9 +85,7 @@ function Player.reset_bounds()
 end
 
 -- the player's center point. Nearly every collision test and FX spawn wants
--- this rather than the top-left corner, so it lived hand-written at a dozen
--- call sites; src/collision.lua and every `player`-shaped call site now go
--- through here instead.
+-- this rather than the top-left corner.
 function Player.center()
     return Player.x + Player.size / 2, Player.y + Player.size / 2
 end

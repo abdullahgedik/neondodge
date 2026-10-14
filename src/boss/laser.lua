@@ -1,19 +1,13 @@
 -- The laser boss's beam, as a self-contained subsystem: its own constants, its
 -- own update/draw/collision, and its own encounter-exit rule.
 --
--- It lives in its own file for a concrete reason. The beam is the one type whose
--- behavior the generic engine couldn't express, so the engine used to carry
--- three `if type_def.is_laser` special cases (a replacement update step, an
--- extra collision check, and a different exit condition) while the laser's own
--- drawing and constants sat at the far end of the file from the type that used
--- them. Pulled out here and plugged in through the same optional hooks every
--- other type uses, the engine has no idea the laser is special.
+-- It plugs into the engine through the same optional hooks every other type
+-- uses (update_extra, extra_collision, is_encounter_done, draw_extra), so the
+-- engine has no idea the laser is special.
 --
 -- The beam is a full-width OR full-height band that sweeps edge-to-edge across
--- the WHOLE screen each cycle, on a randomly chosen axis and direction. Earlier
--- versions pivoted from a fixed point, then slid a short distance -- both left
--- some region of the arena permanently safe. Edge-to-edge across a random axis
--- doesn't.
+-- the WHOLE screen each cycle, on a randomly chosen axis and direction, so no
+-- region of the arena is ever permanently safe.
 local Screen  = require("src/screen")
 local Config  = require("src/boss/config")
 local Attacks = require("src/boss/attacks")
@@ -27,32 +21,33 @@ local THICKNESS          = 18
 local EDGE_MARGIN        = 30   -- keep the sweep just inside the absolute screen edges
 local SHOT_INTERVAL      = 0.75 -- the aimed shot, independent of the beam cycle
 
--- The encounter ends once exactly this many sweeps finish -- the laser is the
--- one type with no time budget, because its beam cycle never lined up with one
--- (on a timer it could leave mid-telegraph).
---
--- 5 was tried at 4.3s per cycle back when every other boss ran 14s, and was
--- reverted for dragging at ~23s against their ~16s. It fits now: the laser
--- sits between bouncer (23s) and phantom (25s) in Boss.SEQUENCE, so five
--- sweeps (~23.6s total) lands it right where its neighbours are instead of
--- overshooting them.
+-- The encounter ends once exactly this many sweeps finish, rather than on a
+-- time budget that could cut a sweep off mid-telegraph. Five sweeps (~23.6s)
+-- sits between its neighbours in Boss.SEQUENCE, bouncer (23s) and phantom
+-- (25s).
 local MAX_SWEEPS         = 5
 
 -- Runs in place of the generic fire step (the laser type has no `fire` field,
 -- so nothing double-fires). Two independent things tick here: the beam's
 -- cooldown -> telegraph -> firing cycle, and a straight aimed shot on its own
 -- faster cadence so shots don't have to wait on the beam.
+--
+-- difficulty_mult (1 outside Boss Rush) speeds up the shots, the gap between
+-- sweeps and the sweep itself, matching how every other type scales. The
+-- telegraph deliberately stays the same length, so a harder lap is never
+-- less readable.
 function Laser.update(instance, type_def, dt, player, hooks)
+    local mult = instance.difficulty_mult
     instance.laser_timer = instance.laser_timer + dt
 
     instance.shot_timer = instance.shot_timer + dt
-    if instance.shot_timer >= SHOT_INTERVAL then
+    if instance.shot_timer >= SHOT_INTERVAL / mult then
         instance.shot_timer = 0
         Attacks.aimed_shot(instance, type_def, player, hooks.spawn_projectile, { ring_color = { 1, 0.7, 0.2 } })
     end
 
     if instance.laser_state == "cooldown" then
-        if instance.laser_timer >= COOLDOWN_DURATION then
+        if instance.laser_timer >= COOLDOWN_DURATION / mult then
             instance.laser_state = "telegraph"
             instance.laser_timer = 0
 
@@ -77,11 +72,12 @@ function Laser.update(instance, type_def, dt, player, hooks)
             instance.laser_timer = 0
         end
     elseif instance.laser_state == "firing" then
-        local t = math.min(instance.laser_timer / FIRE_DURATION, 1)
+        local fire_duration = FIRE_DURATION / mult
+        local t = math.min(instance.laser_timer / fire_duration, 1)
         instance.laser_row_y = instance.laser_row_start +
             (instance.laser_row_end - instance.laser_row_start) * t
 
-        if instance.laser_timer >= FIRE_DURATION then
+        if instance.laser_timer >= fire_duration then
             instance.laser_state = "cooldown"
             instance.laser_timer = 0
             instance.laser_sweep_count = instance.laser_sweep_count + 1

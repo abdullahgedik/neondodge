@@ -33,11 +33,9 @@
 --     draw_extra          per-type overlay drawn on top of the body
 --     debug_state         one line of sub-state for the F1 overlay
 --
---   All five hooks receive (instance, type_def, ...) -- take the type_def even
---   if you think you don't need it. The charger's debug_state once took only
---   `instance`, then started needing type_def for its encounter duration, and
---   the result was a crash that only fired with the debug overlay open during
---   a charger encounter.
+--   All five hooks receive (instance, type_def, ...). Declare the type_def
+--   parameter even when a hook doesn't use it yet, so the signature stays
+--   uniform and using it later can't break a caller.
 --
 --   SPLITTING
 --     is_splitter         splits into clones at split_time
@@ -67,6 +65,10 @@ local function warden_squeeze_progress(instance, type_def)
     return Mathx.ease_out(t)
 end
 
+-- how far (px) an arena edge must have moved in from the screen edge before
+-- touching it hurts
+local WARDEN_WALL_MIN_INSET = 8
+
 local function update_warden_arena(instance, type_def, _dt, player, hooks)
     local width = Screen.WIDTH
     local eased = warden_squeeze_progress(instance, type_def)
@@ -85,15 +87,20 @@ local function update_warden_arena(instance, type_def, _dt, player, hooks)
     instance.arena_max_x = center_x + half
     instance.arena_min_y = type_def.arena_final_min_y * eased
 
-    -- the walls are the threat now, not just a restriction: touching any
-    -- edge of the shrinking arena costs HP. Player.bounds() already hard-clamps
-    -- the player's position to exactly this rect every frame, so "touching"
-    -- is just checking that clamp landed on an edge -- same hit_cooldown and
-    -- dash phase-through every other hazard already gives.
+    -- the walls are the threat, not just a restriction: touching any edge of
+    -- the shrinking arena costs HP. Player.bounds() already hard-clamps the
+    -- player's position to exactly this rect every frame, so "touching" is
+    -- just checking that clamp landed on an edge -- same hit_cooldown and dash
+    -- phase-through every other hazard already gives.
+    --
+    -- Only an edge that has visibly moved in counts as a wall. Without that,
+    -- the plain screen edges would hurt from the first frame of the encounter,
+    -- before any wall had been drawn.
     if instance.hit_cooldown <= 0 and not player.is_dashing then
-        local touching = player.x <= instance.arena_min_x
-            or player.x + player.size >= instance.arena_max_x
-            or player.y <= instance.arena_min_y
+        local inset = WARDEN_WALL_MIN_INSET
+        local touching = (instance.arena_min_x >= inset and player.x <= instance.arena_min_x)
+            or (instance.arena_max_x <= width - inset and player.x + player.size >= instance.arena_max_x)
+            or (instance.arena_min_y >= inset and player.y <= instance.arena_min_y)
         if touching then
             instance.hit_cooldown = Config.HIT_COOLDOWN
             hooks.on_player_hit()
@@ -113,9 +120,8 @@ Types.BOSS_TYPES = {
         -- first boss of a run -- the shortest, and the one that teaches the format
         encounter_duration = 19,
         -- patrol_amplitude must reach both screen edges from a centered
-        -- base_x (417.5px away each side at this width) -- it used to fall
-        -- well short (240), leaving the far left/right permanently unvisited
-        -- by the boss's own body regardless of the player_min_y wall below
+        -- base_x (417.5px away each side at this width), or the far
+        -- left/right would never be visited by the boss's own body
         patrol_amplitude = 430,
         patrol_speed = 0.8,
         fire_interval = 0.95,
@@ -125,11 +131,9 @@ Types.BOSS_TYPES = {
         -- 4-4, ...) instead of every volley being a gamble on whether a
         -- double is coming
         double_shot_delay = 0.28,
-        -- walls off the top of the screen (see Boss.get_player_bounds): a
-        -- single tracked shot every couple seconds was still trivially
-        -- dodgeable from a static camping spot, so this pairs a bigger body
-        -- (harder to squeeze past during patrol) with denying the player the
-        -- "stand above the boss and ignore everything" position outright
+        -- walls off the top of the screen (see Boss.get_player_bounds): its
+        -- fans only fire downward, so standing above it would otherwise be
+        -- completely safe
         player_min_y = 140,
         fire = function(instance, type_def, spawn_projectile)
             Attacks.spread(instance, type_def, spawn_projectile,
@@ -207,8 +211,7 @@ Types.BOSS_TYPES = {
         -- shared with splitter_hunter/splitter_sentry: the clones carry the parent's hover_timer, so all three must agree on when the encounter ends
         encounter_duration = 26,
         -- must reach both screen edges from a centered base_x (437.5px away
-        -- each side at this width) -- 200 fell well short, leaving both the
-        -- far left and far right permanently unvisited by the boss's body
+        -- each side at this width)
         patrol_amplitude = 450,
         patrol_speed = 0.85,
         fire_interval = 1.0,
@@ -221,12 +224,10 @@ Types.BOSS_TYPES = {
         split_time = 6,
     },
     -- Spawned by splitter's split, not part of the normal boss sequence. The
-    -- two clones used to be identical twins differing only by position --
-    -- doubling the same spray pattern read as "the same fight, but with two
-    -- of it" rather than a real escalation. Now they take asymmetric roles:
-    -- a hunter that makes the player move, and a sentry that makes them
-    -- respect a zone. Which clone gets which role is randomized at split
-    -- time (see Boss.spawn_split_clones), so the pairing can't be memorized.
+    -- two clones take asymmetric roles: a hunter that makes the player move,
+    -- and a sentry that makes them respect a zone. Which clone gets which
+    -- role is randomized at split time (see Boss.spawn_split_clones), so the
+    -- pairing can't be memorized.
     --
     -- hunter: relentlessly closes on the player's column and fires a fast
     -- aimed shot. No player_min_y wall -- Attacks.aimed_shot always targets
@@ -248,9 +249,7 @@ Types.BOSS_TYPES = {
         end,
     },
     -- sentry: patrols a wide circle around the arena's own center (the same
-    -- Movement.orbit Turret uses, just its own radius/center/speed) instead of
-    -- holding one spot -- a first pass had it wobble in a tiny 40px circle
-    -- around wherever it split, which barely read as movement at all. Radius
+    -- Movement.orbit Turret uses, just its own radius/center/speed). Radius
     -- and speed are sized to cover most of the arena (960x540, boss 42x30)
     -- without ever reaching a screen edge, so the circle never gets clipped
     -- into a flattened arc. No player_min_y wall -- a full ring has no blind
@@ -339,9 +338,8 @@ Types.BOSS_TYPES = {
         -- scales below as the encounter runs, so the last slams come with
         -- roughly a third of the aim time and half the telegraph of the first.
         -- Tracking gets its own steeper ramp (late_track_speed_scale) rather
-        -- than sharing late_speed_scale with slam/retreat -- by request, the
-        -- aim phase itself should hunt you down noticeably faster late in the
-        -- encounter, not just slam/retreat harder.
+        -- than sharing late_speed_scale with slam/retreat, so late in the
+        -- encounter the aim phase itself hunts noticeably faster.
         track_speed = 350,
         aim_duration = 1.1,
         telegraph_duration = 0.55,
@@ -433,13 +431,9 @@ Types.BOSS_TYPES = {
     },
     -- squeezes the legal play area inward over the encounter (see
     -- update_warden_arena above) while lobbing a spread that escalates as the
-    -- squeeze tightens. Generalizes the existing player_min_y wall from one
-    -- edge to all four. Started out as pure space-control with the walls
-    -- just blocking movement and the shots "incidental by design" -- that
-    -- read as restrictive rather than dangerous, so now the walls themselves
-    -- deal damage (see update_warden_arena) and the fire rate ramps with the
-    -- same squeeze progress, so the payoff for the room shrinking is real
-    -- stakes, not just less space to stand in.
+    -- squeeze tightens. Generalizes the player_min_y wall from one edge to
+    -- three, and the walls themselves deal damage, so the shrinking room is
+    -- real stakes rather than just less space to stand in.
     warden = {
         width = 115,
         height = 65,
@@ -452,11 +446,7 @@ Types.BOSS_TYPES = {
         fire_interval = 1.15,
         update_extra = update_warden_arena,
         -- The arena it closes down to, and how much of the encounter it takes
-        -- to get there (held at full squeeze for the remainder). Tightened
-        -- from 380 wide / 0.8 ratio: the squeeze is the entire identity of
-        -- this type and at the old numbers it finished barely narrower than
-        -- the space a Sentinel already denies. These three are the knobs to
-        -- move for the rework.
+        -- to get there (held at full squeeze for the remainder).
         arena_final_width = 384,
         arena_final_min_y = 212,
         arena_close_ratio = 0.7,
@@ -506,6 +496,7 @@ Types.BOSS_TYPES = {
         shape = Shapes.phantom,
         encounter_duration = 25,
         movement = Movement.blink,
+        is_encounter_done = Movement.blink_is_encounter_done,
         visible_duration = 1.5,
         fade_duration = 0.35,
         fire_interval = 0.65,

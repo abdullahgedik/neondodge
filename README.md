@@ -26,7 +26,9 @@ cards, just a heal between fights — see `run.mode` below).
 | --- | --- |
 | WASD / arrows | move (gamepad left stick or d-pad also works) |
 | Shift / gamepad A | dash — a short burst that also passes *through* hazards |
-| P / gamepad Start | pause |
+| P / Esc / gamepad Start | pause (the game also pauses itself if the window loses focus) |
+| R / Enter / gamepad A | restart, on the game-over screen |
+| M / Esc / gamepad B | back to the main menu, on the game-over and pause screens |
 | **F1** | toggle the debug overlay — everything below needs it on |
 | F2 | force the card-select screen open |
 | F3 | spawn the next boss in the sequence |
@@ -42,15 +44,16 @@ to wave 30.
 ## How one frame works
 
 LÖVE doesn't give you a `main()` you write yourself. You define callbacks and
-the engine calls them. There are exactly **seven** in this project, all in
-`main.lua`:
+the engine calls them. All of this project's are in `main.lua`:
 
 ```
 love.load()      -- once, at startup
 love.update(dt)  -- every frame; dt = seconds since the last frame
 love.draw()      -- every frame, right after update
 love.resize()    -- when the window size changes
-love.keypressed(key) / love.gamepadpressed(...) / love.mousepressed(...)
+love.focus(f)    -- when the window gains or loses focus
+love.keypressed / love.gamepadpressed / love.gamepadaxis
+love.mousepressed / love.mousemoved
 ```
 
 > **`love.xxx` vs `Game.xxx`** — in `main.lua`, anything named `love.xxx` is a
@@ -110,7 +113,7 @@ they overlap but are deliberately different, see the comments there.
 | `src/game_state.lua` | the five states (`MENU/PLAYING/PAUSED/CARD_SELECT/GAME_OVER`) and nothing else |
 | `src/pool.lua` | object pool — reuses tables instead of allocating per spawn |
 | `src/collision.lua` | the only two overlap shapes in the game, plus the dash-phase-through rule |
-| `src/mathx.lua` | `lerp`, `clamp`, `ease_out` — named so the formulas aren't cryptic inline |
+| `src/mathx.lua` | `lerp`, `clamp`, `ease_out`, `atan2` — named so the formulas aren't cryptic inline |
 
 ### Entities
 

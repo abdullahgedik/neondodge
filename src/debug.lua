@@ -88,11 +88,8 @@ function Debug.draw(view)
     local live = {}
     for _, instance in ipairs(boss.instances) do live[instance.type_id] = true end
 
-    -- The roster used to carry a single ">" marking Debug.next_boss_index, but
-    -- that counter only moves when F3 or a number key fires -- so a
-    -- wave-spawned boss never moved it, and pressing "3" left it pointing at 4
-    -- while boss 3 was on screen. Both made the marker look simply wrong.
-    -- Three separate facts are now shown separately:
+    -- Three separate facts, shown separately because the F3 counter and the
+    -- run's own boss counter move independently:
     --   *  this type is on screen now
     --   >  F3 would spawn this next
     --   ^  the run itself will spawn this at the next boss wave

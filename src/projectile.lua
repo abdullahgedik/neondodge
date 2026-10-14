@@ -2,6 +2,7 @@ local Pool = require("src/pool")
 local FXManager = require("src/fx_manager")
 local Collision = require("src/collision")
 local Screen = require("src/screen")
+local Mathx = require("src/mathx")
 
 local Projectile = {}
 
@@ -15,27 +16,7 @@ local Projectile = {}
 local HOMING_BLAST_RADIUS   = 52
 local HOMING_BLAST_WARNING  = 1.0
 
--- math.atan2 works on LOVE's LuaJIT runtime but is deprecated/removed in
--- standard Lua 5.3+, and it's unclear whether a two-arg math.atan(y, x) is
--- safe to assume either -- so build atan2 from single-arg math.atan, which
--- is guaranteed correct on every Lua version.
-local function atan2(y, x)
-    if x > 0 then
-        return math.atan(y / x)
-    elseif x < 0 then
-        if y >= 0 then
-            return math.atan(y / x) + math.pi
-        else
-            return math.atan(y / x) - math.pi
-        end
-    elseif y > 0 then
-        return math.pi / 2
-    elseif y < 0 then
-        return -math.pi / 2
-    else
-        return 0
-    end
-end
+local atan2 = Mathx.atan2
 
 local function steer_towards(dir_x, dir_y, to_x, to_y, max_turn)
     local cur_angle = atan2(dir_y, dir_x)
