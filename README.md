@@ -4,9 +4,8 @@ A project to learn Lua and LÖVE — a top-down dodge/collect arcade game.
 Everything is drawn with shapes: no sprites, no audio files, no external
 libraries.
 
-It has outgrown "tutorial project", so this file is the **map**: how a frame
-runs, where each thing lives, and recipes for the changes you're most likely to
-want to make.
+This README covers how a frame runs, where each thing lives, and recipes for
+the changes you're most likely to want to make.
 
 ---
 
@@ -171,9 +170,7 @@ Worth knowing before you add a variable to `main.lua`:
   `"boss_rush"`, the switch that turns off waves/storms/cards and drives the
   fixed boss gauntlet instead). `reset_run_state()` is the only thing
   that clears it, so adding a field to `run` automatically means it gets wiped
-  on restart. There is no second list to keep in sync — that used to be ~20
-  loose locals plus a hand-written 20-line reset, and forgetting one was a bug
-  this project hit twice.
+  on restart. There is no second list to keep in sync.
 - **module-level locals in `main.lua`** — only `menu_cursor` and
   `reset_confirm_timer`, which belong to menu navigation rather than a run.
 - **each module's own table** — `Player.lives`, `Boss.instances`, etc. Wiped by
@@ -272,17 +269,16 @@ something the generic engine doesn't know about:
 | --- | --- |
 | `update_extra` | extra per-frame work (the laser's beam cycle, the warden's closing arena) |
 | `extra_collision` | an extra hit test beyond the body rect |
-| `is_encounter_done` | override the default "hover for 14s then leave" exit |
+| `is_encounter_done` | override the default "hover for `encounter_duration`, then leave" exit |
 | `draw_extra` | overlay drawn on top of the body |
 | `debug_state` | one line of sub-state for the F1 overlay |
 
 The laser uses four of those five, which is why it needs no special-casing
 anywhere in the engine.
 
-Every hook is called as `(instance, type_def, ...)`. **Take the `type_def` even
-if you think you don't need it** — the charger's `debug_state` once didn't, then
-later needed it, and the result was a crash that only fired with the debug
-overlay open during a charger encounter.
+Every hook is called as `(instance, type_def, ...)`. **Declare the `type_def`
+parameter even if you don't need it yet**, so the signature stays uniform and
+using it later can't break a caller.
 
 **The trap to know about:** if your boss only threatens *downward*, a player
 standing above it is completely safe. Two fixes work together to close this:
@@ -308,8 +304,8 @@ mutate it incrementally.
 - Wave length / spawn ramp: `src/difficulty.lua`
 - Boss and storm cadence: `BOSS_WAVE_INTERVAL`, `STORM_WAVE_INTERVAL` in `main.lua`
 - Score-milestone card interval: `SCORE_PER_CARD` in `main.lua`
-- Storm composition: `STORM_TYPES` in `main.lua`
-- Which hazards exist when: the `UNLOCK_STAGE_*` constants in `main.lua`
+- Storm composition: `Storms.TYPES` in `src/storms.lua`
+- Which hazards exist when: the stage constants in `src/unlocks.lua`
 - Individual boss numbers: that type's entry in `BOSS_TYPES`
 - Boss Rush's per-lap ramp: `RUSH_DIFFICULTY_STEP` in `main.lua` (reads back
   through `Boss.spawn`'s optional `difficulty_mult` argument)
@@ -352,8 +348,8 @@ needing many values takes one table:
 UI.draw({ state = ..., score = ..., lives = ... })
 ```
 
-`UI.draw` and `Boss.update` both do this. `UI.draw` previously took sixteen
-positional arguments, where adding one meant counting commas at the call site.
+`UI.draw` and `Boss.update` both do this, so adding a field never means
+counting commas at the call site.
 
 **`goto continue`** is Lua's "skip to the next loop iteration" — it needs an
 explicit `::continue::` label at the end of the loop body. The entity modules
@@ -376,12 +372,6 @@ whole file before running any of it:
 love .
 ```
 
-But that only exercises the **menu** — it never reaches gameplay, a boss, or the
-pause screen. For anything touching those, the pattern used in this project is a
-throwaway harness: a scratch folder with a copy of `src/` and its own `main.lua`
-that drives the code paths directly and prints pass/fail. That's how "all ten
-bosses still complete an encounter" gets checked without playing ten encounters
-by hand.
-
-Actual *feel* — is it fun, is it fair, is the difficulty right — can only be
-playtested, and no harness substitutes for it.
+That only exercises the **menu**, though. For gameplay changes, use the F1
+debug hotkeys above to jump straight to the wave or boss you touched, then
+playtest it.
