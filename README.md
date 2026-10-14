@@ -151,6 +151,7 @@ part that runs it:
 | `src/background.lua` | parallax starfield |
 | `src/bloom.lua` | the glow shader (bright-pass + blur + additive composite) |
 | `src/hit_effect.lua` | on-hit chromatic aberration, low-HP red pulse |
+| `src/icon.lua` | the neon "ND" icon, drawn in code — used for the window icon and rendered into the exe's `.ico` for releases |
 
 ### Systems
 

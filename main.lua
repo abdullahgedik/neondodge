@@ -25,6 +25,7 @@ local Debug                     = require("src/debug")
 local Screen                    = require("src/screen")
 local Storms                    = require("src/storms")
 local Unlocks                   = require("src/unlocks")
+local Icon                      = require("src/icon")
 
 -- This file's own helpers and event handlers live on `Game`, NOT on `love`.
 -- Everything named `love.xxx` here is a callback LÖVE itself calls for us
@@ -233,22 +234,9 @@ end
 -- love.load
 -- ===========================================================================
 
--- The window/taskbar icon, drawn in code like everything else: the player's
--- cyan square on the game's dark backdrop.
-local function set_window_icon()
-    local size = 32
-    local icon = love.image.newImageData(size, size)
-    icon:mapPixel(function(x, y)
-        if x >= 8 and x < 24 and y >= 8 and y < 24 then
-            return 0, 1, 0.85, 1
-        end
-        return 0.05, 0.05, 0.1, 1
-    end)
-    love.window.setIcon(icon)
-end
-
 function love.load()
-    set_window_icon()
+    -- the window/taskbar icon (see src/icon.lua -- the exe uses the same one)
+    love.window.setIcon(Icon.render(64))
     for _, module in ipairs(LOADABLE_MODULES) do module.load() end
 end
 
